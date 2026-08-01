@@ -45,9 +45,9 @@ export const genDefaultLocalStorage = (): LocalStorage => {
         },
         other: {
           timezone: { type: HookType.default },
-          canvas: { type: HookType.page },
-          audio: { type: HookType.default },
-          webgl: { type: HookType.page },
+          canvas: { type: HookType.browser },
+          audio: { type: HookType.browser },
+          webgl: { type: HookType.browser },
           webrtc: { type: HookType.default },
           font: { type: HookType.default },
           webgpu: { type: HookType.default },

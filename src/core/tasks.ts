@@ -325,61 +325,64 @@ export const hookTasks: HookTask[] = [
 
   /**
    * Canvas 2d
+   * 系统值时仍监听 getImageData，仅在有 seed 时注入噪声
    */
   {
-    condition: ({ conf }) => conf.fp.other.canvas.type !== HookType.default,
     onEnable: (ctx) => {
       const { win, conf, useSeed, useProxy } = ctx;
       if (!win) return;
 
-      /* getContext */
-      useProxy(win.HTMLCanvasElement.prototype, 'getContext', {
-        apply: (target, thisArg, args: Parameters<typeof HTMLCanvasElement.prototype.getContext>) => {
-          if (args[0] === '2d') {
-            const option = args[1] ?? {};
-            option.willReadFrequently = true;
-            args[1] = option
+      const seed = useSeed(conf.fp.other.canvas)
+      const noise = seed == null ? null : randomCanvasNoise(seed)
+
+      /* getContext：仅伪装模式需要 willReadFrequently */
+      if (noise) {
+        useProxy(win.HTMLCanvasElement.prototype, 'getContext', {
+          apply: (target, thisArg, args: Parameters<typeof HTMLCanvasElement.prototype.getContext>) => {
+            if (args[0] === '2d') {
+              const option = args[1] ?? {};
+              option.willReadFrequently = true;
+              args[1] = option
+            }
+            return target.apply(thisArg, args);
+          }
+        })
+      }
+
+      useProxy(win.CanvasRenderingContext2D.prototype, 'getImageData', {
+        apply: (target, thisArg: CanvasRenderingContext2D, args: Parameters<typeof CanvasRenderingContext2D.prototype.getImageData>) => {
+          notify('strong.canvas')
+          if (noise) {
+            return drawNoiseTo2d(ctx, noise, thisArg, ...args);
           }
           return target.apply(thisArg, args);
         }
       })
-
-      /* getImageData */
-      {
-        const seed = useSeed(conf.fp.other.canvas)
-        if (seed != null) {
-          const noise = randomCanvasNoise(seed)
-          useProxy(win.CanvasRenderingContext2D.prototype, 'getImageData', {
-            apply: (target, thisArg: CanvasRenderingContext2D, args: Parameters<typeof CanvasRenderingContext2D.prototype.getImageData>) => {
-              notify('strong.canvas')
-              return drawNoiseTo2d(ctx, noise, thisArg, ...args);
-            }
-          })
-        }
-      }
     },
   },
 
   /**
    * Canvas WebGL
+   * 系统值时仍监听 shaderSource，仅在有 seed 时改写着色器
    */
   {
-    condition: ({ conf }) => conf.fp.other.webgl.type !== HookType.default,
     onEnable: ({ gthis, conf, useSeed, useProxy }) => {
       const seed = useSeed(conf.fp.other.webgl)
-      if (seed != null) {
-        const fragColorRegex = /gl_FragColor\s*=\s*([\s\S]+?);/;
-        const paramRegex = /[,+\-*/()]/;
+      const fragColorRegex = /gl_FragColor\s*=\s*([\s\S]+?);/;
+      const paramRegex = /[,+\-*/()]/;
 
+      let vecOffset: string | null = null
+      if (seed != null) {
         const randGen = makeSeededRandom(seed, 1e-2, 1e-5);
         const randFn = () => randGen().toFixed(5);
+        vecOffset = `vec4(${randFn()},${randFn()},${randFn()},0)`;
+      }
 
-        const vecOffset = `vec4(${randFn()},${randFn()},${randFn()},0)`;
+      const handler = {
+        apply: (target: any, thisArg: WebGLRenderingContext | WebGL2RenderingContext, args: any) => {
+          notify('strong.webgl')
 
-        const handler = {
-          apply: (target: any, thisArg: WebGLRenderingContext | WebGL2RenderingContext, args: any) => {
-            notify('strong.webgl')
-
+          if (vecOffset) {
             const source = args[1]
             if (source && typeof source === 'string') {
               args[1] = source.replace(fragColorRegex, (match, expr: string) => {
@@ -393,13 +396,13 @@ export const hookTasks: HookTask[] = [
                 }
               });
             }
-
-            return Reflect.apply(target, thisArg, args);
           }
+
+          return Reflect.apply(target, thisArg, args);
         }
-        useProxy(gthis.WebGLRenderingContext.prototype, 'shaderSource', handler)
-        useProxy(gthis.WebGL2RenderingContext.prototype, 'shaderSource', handler)
       }
+      useProxy(gthis.WebGLRenderingContext.prototype, 'shaderSource', handler)
+      useProxy(gthis.WebGL2RenderingContext.prototype, 'shaderSource', handler)
     },
   },
 
@@ -444,28 +447,25 @@ export const hookTasks: HookTask[] = [
 
   /**
    * Canvas Base
+   * 系统值时仍监听导出 API，仅在有 seed 时注入噪声
    */
   {
-    condition: ({ conf }) => conf.fp.other.canvas.type !== HookType.default,
     onEnable: (ctx) => {
       const { gthis, win, conf, useSeed, useProxy } = ctx;
 
       const seedCanvas = useSeed(conf.fp.other.canvas);
-
       const noiseCanvas = seedCanvas == null ? null : randomCanvasNoise(seedCanvas);
 
       const handler = {
         apply: (target: Function, thisArg: OffscreenCanvas | HTMLCanvasElement, args: any) => {
-          /* 2d */
+          notify('strong.canvas');
           if (noiseCanvas) {
             const c2d = thisArg.getContext('2d');
             if (c2d) {
-              notify('strong.canvas');
               drawNoiseTo2d(
                 ctx, noiseCanvas, c2d as any,
                 0, 0, thisArg.width, thisArg.height
               );
-              return Reflect.apply(target, thisArg, args);
             }
           }
           return Reflect.apply(target, thisArg, args);
@@ -482,23 +482,20 @@ export const hookTasks: HookTask[] = [
 
   /**
    * Audio
-   * 音频指纹
+   * 系统值时仍监听，仅在有 seed 时注入噪声
    */
   {
-    condition: ({ conf }) => conf.fp.other.audio.type !== HookType.default,
     onEnable: ({ win, conf, useSeed, useProxy, useGetterProxy }) => {
       if (!win) return;
 
       const seed = useSeed(conf.fp.other.audio)
-      if (seed == null) return;
-
       const mem = new WeakSet()
 
       useProxy(win.AudioBuffer.prototype, 'getChannelData', {
         apply: (target, thisArg: AudioBuffer, args: Parameters<typeof AudioBuffer.prototype.getChannelData>) => {
           notify('strong.audio')
           const data = target.apply(thisArg, args)
-          if (mem.has(data)) return data;
+          if (seed == null || mem.has(data)) return data;
 
           const step = data.length > 2000 ? 100 : 20;
           for (let i = 0; i < data.length; i += step) {
@@ -525,11 +522,12 @@ export const hookTasks: HookTask[] = [
         }
       })
 
-      const dcNoise = seededRandom(seed) * 1e-7;
+      const dcNoise = seed == null ? 0 : seededRandom(seed) * 1e-7;
       useGetterProxy(win.DynamicsCompressorNode.prototype, 'reduction', (_, getter) => ({
         apply(target, thisArg, args: any) {
           notify('strong.audio')
           const res = getter.call(thisArg);
+          if (seed == null) return res;
           return (typeof res === 'number' && res !== 0) ? res + dcNoise : res;
         }
       }))
@@ -780,16 +778,42 @@ export const hookTasks: HookTask[] = [
   },
 
   /**
-   * Font
-   * 字体指纹
+   * Webrtc 调用记录（系统值 / 防泄露时）
    */
   {
-    condition: ({ conf }) => conf.fp.other.font.type !== HookType.default,
+    condition: ({ conf }) => conf.fp.other.webrtc.type !== HookType.disabled,
+    onEnable: ({ win, useProxy }) => {
+      if (!win) return;
+
+      const keys = [
+        'RTCPeerConnection',
+        'mozRTCPeerConnection',
+        'webkitRTCPeerConnection',
+      ] as const
+
+      for (const key of keys) {
+        // @ts-ignore
+        if (typeof win[key] !== 'function') continue;
+        // @ts-ignore
+        useProxy(win, key, {
+          construct(target: any, args: any, newTarget: any) {
+            notify('strong.webrtc')
+            return Reflect.construct(target, args, newTarget)
+          }
+        })
+      }
+    },
+  },
+
+  /**
+   * Font
+   * 系统值时仍监听，仅在有 seed 时注入噪声
+   */
+  {
     onEnable: ({ win, conf, useSeed, useProxy, useGetterProxy }) => {
       if (!win) return;
 
       const seed = useSeed(conf.fp.other.font)
-      if (seed == null) return;
 
       useGetterProxy(win.HTMLElement.prototype, [
         'offsetHeight', 'offsetWidth'
@@ -797,6 +821,7 @@ export const hookTasks: HookTask[] = [
         apply(target: () => any, thisArg: HTMLElement, args: any) {
           notify('strong.fonts')
           const result = getter.call(thisArg);
+          if (seed == null) return result;
           const mark = (thisArg.style?.fontFamily ?? key) + result;
           return result + randomFontNoise(seed, mark);
         }
@@ -807,12 +832,14 @@ export const hookTasks: HookTask[] = [
           const source = args[1]
           if (typeof source === 'string' && source.startsWith('local(')) {
             notify('strong.fonts')
-            const name = source.substring(source.indexOf('(') + 1, source.indexOf(')'));
-            const rand = seededRandom(name + seed, 1, 0);
-            if (rand < 0.02) {
-              args[1] = `local("${rand}")`
-            } else if (rand < 0.04) {
-              args[1] = 'local("Arial")'
+            if (seed != null) {
+              const name = source.substring(source.indexOf('(') + 1, source.indexOf(')'));
+              const rand = seededRandom(name + seed, 1, 0);
+              if (rand < 0.02) {
+                args[1] = `local("${rand}")`
+              } else if (rand < 0.04) {
+                args[1] = 'local("Arial")'
+              }
             }
           }
           return new target(...args)
@@ -824,19 +851,19 @@ export const hookTasks: HookTask[] = [
 
   /**
    * Webgpu
+   * 系统值时仍监听，仅在有 seed 时注入噪声
    */
   {
-    condition: ({ conf }) => conf.fp.other.webgpu.type !== HookType.default,
     onEnable: ({ win, conf, useSeed, useDefine, useProxy, newProxy }) => {
       if (!win) return;
 
       const seed = useSeed(conf.fp.other.webgpu)
-      if (seed == null) return;
 
       /* GPUAdapter & GPUDevice */
       {
         const makeNoise = (raw: any, offset: number) => {
           notify('strong.webgpu')
+          if (seed == null) return raw;
           const rn = seededRandom(seed + (offset * 7), 64, 1)
           return raw ? raw - Math.floor(rn) : raw;
         }
@@ -873,7 +900,7 @@ export const hookTasks: HookTask[] = [
         useProxy(win.GPUCommandEncoder.prototype, 'beginRenderPass', {
           apply(target, self, args) {
             notify('strong.webgpu')
-            if (args?.[0]?.colorAttachments?.[0]?.clearValue) {
+            if (seed != null && args?.[0]?.colorAttachments?.[0]?.clearValue) {
               try {
                 const _clearValue = args[0].colorAttachments[0].clearValue
                 let offset = 0
@@ -899,7 +926,7 @@ export const hookTasks: HookTask[] = [
           apply(target, self, args) {
             notify('strong.webgpu')
             const _data = args?.[2]
-            if (_data && _data instanceof Float32Array) {
+            if (seed != null && _data && _data instanceof Float32Array) {
               try {
                 const count = Math.ceil(_data.length * 0.05)
                 let offset = 0
@@ -927,23 +954,21 @@ export const hookTasks: HookTask[] = [
 
   /**
    * DomRect
+   * 系统值时仍监听，仅在有 seed 时注入噪声
    */
   {
-    condition: ({ conf }) => conf.fp.other.domRect.type !== HookType.default,
     onEnable: ({ win, conf, useSeed, useProxy }) => {
       if (!win) return;
 
       const seed = useSeed(conf.fp.other.domRect)
-      if (seed == null) return;
-
-      const noise = seededRandom(seed, 1e-6, -1e-6);
+      const noise = seed == null ? 0 : seededRandom(seed, 1e-6, -1e-6);
 
       {
         const handler = {
           apply(target: () => DOMRect, thisArg: any, args: any) {
             notify('strong.domRect')
             const rect = Reflect.apply(target, thisArg, args);
-            if (rect) {
+            if (rect && seed != null) {
               if (rect.x !== 0) rect.x += noise;
               if (rect.width !== 0) rect.width += noise;
             }
@@ -959,7 +984,7 @@ export const hookTasks: HookTask[] = [
           apply(target: () => DOMRectList, thisArg: any, args: any) {
             notify('strong.domRect')
             const rlist = Reflect.apply(target, thisArg, args);
-            if (rlist) {
+            if (rlist && seed != null) {
               for (let i = 0; i < rlist.length; i++) {
                 const rect = rlist[i];
                 if (rect.x !== 0) rect.x += noise;

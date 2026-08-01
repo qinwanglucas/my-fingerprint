@@ -248,7 +248,7 @@
     ],
     "record": [
       "**Fingerprint Record**",
-      "Record the call of fingerprint api, some api are often used when rendering elements, so the number of records for some api will be very large",
+      "Records fingerprint-related API calls. Calls are recorded even when an item is set to the system/default value (no spoofing). Some APIs are used heavily during rendering, so counts can be very large",
       "**Embedded Frame Record**",
       "Record the source address and number of iframe loaded"
     ]

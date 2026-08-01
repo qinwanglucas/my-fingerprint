@@ -1,0 +1,35 @@
+---
+description: Bump extension manifest version when packaged (xpi/zip) content changes
+alwaysApply: true
+---
+
+# Manifest version bump for packaged builds
+
+Whenever you change content that ships inside the extension package (Firefox `.xpi` / Chrome `.zip`), you **must** bump `version` in `manifest.ts` in the same change set.
+
+## What counts as packaged content
+
+- `src/**` (background, popup, content scripts, core, locales used at runtime, etc.)
+- `public/**`, `_locales/**`, icons and other assets copied into `dist` / `dist-firefox`
+- `manifest.ts` itself (permissions, ids, scripts entry points) — still bump `version` if the shipped addon behavior or metadata for stores changes
+- Build/pack scripts only: **no** version bump required
+
+## How to bump
+
+- Source of truth: `manifest.ts` → `baseManifest.version` (semver `MAJOR.MINOR.PATCH`, currently e.g. `2.8.1`)
+- Prefer **PATCH** for fixes/small tweaks; **MINOR** for user-visible features; **MAJOR** for breaking changes
+- Do not leave packaging/AMO submission changes on an unchanged version — AMO rejects reuse of an already-uploaded version
+
+```typescript
+// ❌ BAD: ship code changes without bumping
+version: '2.8.1',
+
+// ✅ GOOD: bump with the content change
+version: '2.8.2',
+```
+
+## Checklist before finishing
+
+1. Diff includes extension/runtime/asset changes that affect `./build` / `npm run xpi` output  
+2. `manifest.ts` `version` increased accordingly  
+3. Mention the new version in the commit message when committing
