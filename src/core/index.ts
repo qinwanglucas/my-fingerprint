@@ -28,6 +28,11 @@ const args = _args;
   if (typeof window !== "undefined") {
     // @ts-ignore
     if (!args.fun && typeof coreInject === 'function') args.fun = coreInject;
+    // Persist source so Workers can re-inject even if `fun` is unavailable later
+    if (typeof args.fun === 'function') {
+      args.funSource = args.fun.toString();
+      args.funName = args.fun.name || 'coreInject';
+    }
     if (!window || !storage) return;
 
     const hook = (win: Window & typeof globalThis, data: WindowStorage | undefined) => {

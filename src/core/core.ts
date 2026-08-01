@@ -432,17 +432,23 @@ export class FingerprintContext {
   }
 
   public makeScript = () => {
-    if (!this.args?.fun) return;
+    const fun = this.args?.fun;
+    const src =
+      (typeof fun === 'function' ? fun.toString() : null) ??
+      (typeof this.args?.funSource === 'string' ? this.args.funSource : null);
+    if (!src) return;
 
-    const fun: (args: any) => string = this.args?.fun;
-    if (!fun || typeof fun !== 'function') return;
+    const name =
+      (typeof fun === 'function' && fun.name) ||
+      this.args?.funName ||
+      'coreInject';
 
     const options = JSON.stringify({
       info: this.info,
       conf: this.conf,
       seed: this.seed,
     })
-    return `${fun.toString()};${fun.name}({options:${options}});`;
+    return `${src};${name}({options:${options}});`;
   }
 
 }

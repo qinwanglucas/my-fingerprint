@@ -92,19 +92,24 @@ export const hookTasks: HookTask[] = [
 
   /**
    * Worker
+   * 向 Dedicated / Shared Worker 注入伪装脚本（含 blob / data / 可同步读取的脚本 URL）
    */
   {
     onEnable: ({ win, conf, useProxy, makeScript }) => {
       if (!win) return;
 
       const blobMap = new Map<string, Blob>();
+      const RawURL = win.URL;
 
       useProxy(win.URL, 'createObjectURL', {
         apply(target, thisArg: URL, args: any) {
           const blob = args[0]
-          if (blob instanceof Blob) {
+          const isBlobLike = blob instanceof Blob ||
+            Object.prototype.toString.call(blob) === '[object Blob]' ||
+            Object.prototype.toString.call(blob) === '[object File]'
+          if (isBlobLike) {
             const url = Reflect.apply(target, thisArg, args);
-            blobMap.set(url, blob);
+            blobMap.set(String(url), blob);
             return url;
           }
           return Reflect.apply(target, thisArg, args)
@@ -114,7 +119,7 @@ export const hookTasks: HookTask[] = [
       useProxy(win.URL, 'revokeObjectURL', {
         apply(target, thisArg: URL, args: any) {
           const url = args[0]
-          blobMap.delete(url)
+          blobMap.delete(String(url))
           return Reflect.apply(target, thisArg, args)
         }
       })
@@ -131,20 +136,77 @@ export const hookTasks: HookTask[] = [
         })
       }
 
-      function createScriptUrl(url: string) {
-        if (url.toString().startsWith('blob:')) {
-          const injected = makeScript();
-          if (injected == null) return url;
-
-          const blobScript = blobMap.get(url.toString());
-          if (blobScript) {
-            const blob = new Blob([
-              `(function(){${injected}})();`, blobScript,
-            ], { type: 'application/javascript' });
-            return URL.createObjectURL(blob);
+      const readScriptSync = (url: string): string | null => {
+        try {
+          const xhr = new win.XMLHttpRequest();
+          xhr.open('GET', url, false);
+          xhr.send(null);
+          if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
+            return xhr.responseText;
           }
+        } catch (_) { }
+        return null;
+      }
+
+      const decodeDataUrl = (url: string): string | null => {
+        try {
+          const match = /^data:([^,]*),([\s\S]*)$/.exec(url);
+          if (!match) return null;
+          const meta = match[1] ?? '';
+          const data = match[2] ?? '';
+          return /;base64/i.test(meta) ? win.atob(data) : decodeURIComponent(data);
+        } catch (_) {
+          return null;
         }
-        return url;
+      }
+
+      const wrapWithInject = (injected: string, source: string | Blob, isModule: boolean) => {
+        // module worker 不能安全地包 IIFE；仍前置注入，尽量覆盖
+        const prefix = isModule
+          ? `${injected}\n`
+          : `(function(){${injected}})();\n`;
+        const blob = new Blob([prefix, source], { type: 'text/javascript' });
+        return RawURL.createObjectURL(blob);
+      }
+
+      function createScriptUrl(url: string, isModule: boolean) {
+        const injected = makeScript();
+        if (injected == null) return url;
+
+        const href = String(url);
+
+        /* blob: 优先用 createObjectURL 记录；否则同步读回内容 */
+        if (href.startsWith('blob:')) {
+          const blobScript = blobMap.get(href);
+          if (blobScript) {
+            return wrapWithInject(injected, blobScript, isModule);
+          }
+          const text = readScriptSync(href);
+          if (text != null) {
+            return wrapWithInject(injected, text, isModule);
+          }
+          return href;
+        }
+
+        /* data:text/javascript,... */
+        if (href.startsWith('data:')) {
+          const text = decodeDataUrl(href);
+          if (text != null) {
+            return wrapWithInject(injected, text, isModule);
+          }
+          return href;
+        }
+
+        /* http(s) / 相对路径：同源或可同步读取时改写为注入后的 blob */
+        try {
+          const abs = new RawURL(href, win.location.href).href;
+          const text = readScriptSync(abs);
+          if (text != null) {
+            return wrapWithInject(injected, text, isModule);
+          }
+        } catch (_) { }
+
+        return href;
       }
 
       {
@@ -152,16 +214,18 @@ export const hookTasks: HookTask[] = [
           construct(target: any, args: any, newTarget: any) {
             notify('other.worker.' + name)
             const url = args[0];
+            const workerOpts = args[1] as WorkerOptions | undefined;
+            const isModule = workerOpts?.type === 'module';
 
             if (win.TrustedScriptURL && url instanceof win.TrustedScriptURL && tsURLLookup) {
               const ttp = tsURLLookup.get(url);
               if (ttp) {
                 args[0] = ttp.createScriptURL(
-                  createScriptUrl(url.toString())
+                  createScriptUrl(url.toString(), isModule)
                 );
               }
             } else if (typeof url === 'string' || url instanceof URL) {
-              args[0] = createScriptUrl(url.toString());
+              args[0] = createScriptUrl(url.toString(), isModule);
             }
 
             return Reflect.construct(target, args, newTarget) as Worker;
@@ -537,7 +601,7 @@ export const hookTasks: HookTask[] = [
 
   /**
    * Timezone
-   * 时区
+   * 时区 + 相关 locale（覆盖 CreepJS 等常用探测路径）
    */
   {
     condition: ({ conf }) => conf.fp.other.timezone.type !== HookType.default,
@@ -622,6 +686,24 @@ export const hookTasks: HookTask[] = [
         if (!locales) return tzValue.locales;
         if (typeof locales === 'string') return [locales, ...tzValue.locales];
         if (Array.isArray(locales)) return [...locales, ...tzValue.locales];
+        return tzValue.locales;
+      }
+
+      /** 按引擎规则会被当成“本地墙钟”解析的日期字符串 */
+      const shouldTreatAsLocal = (s: string) => {
+        const str = s.trim()
+        if (!str) return false
+        if (/Z$/i.test(str) || /[+-]\d{2}:?\d{2}$/.test(str)) return false
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return false // ISO date-only → UTC
+        if (str.includes('/')) return true
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return true
+        if (/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s/i.test(str)) return true
+        return false
+      }
+
+      const adjustParsedLocalMs = (systemParsedMs: number) => {
+        if (Number.isNaN(systemParsedMs)) return systemParsedMs
+        return systemParsedMs - getDiffMs(new _Date(systemParsedMs))
       }
 
       /* DateTimeFormat */
@@ -630,7 +712,7 @@ export const hookTasks: HookTask[] = [
           notify('weak.timezone')
           args[0] = useCustomLocales(args[0]);
           args[1] = Object.assign({ timeZone: tzValue.zone }, args[1]);
-          return new target(...args)
+          return Reflect.construct(target, args, newTarget)
         },
         apply: (target, thisArg: Intl.DateTimeFormat, args: Parameters<typeof Intl.DateTimeFormat>) => {
           notify('weak.timezone')
@@ -640,17 +722,76 @@ export const hookTasks: HookTask[] = [
         },
       })
 
+      /* 其它 Intl：暴露 resolvedOptions().locale（CreepJS Intl / Worker 货币文案） */
+      const intlLocaleKeys = [
+        'Collator', 'DisplayNames', 'ListFormat',
+        'NumberFormat', 'PluralRules', 'RelativeTimeFormat',
+      ] as const
+      for (const key of intlLocaleKeys) {
+        // @ts-ignore
+        if (typeof gthis.Intl?.[key] !== 'function') continue
+        // @ts-ignore
+        useProxy(gthis.Intl, key, {
+          construct: (target: any, args: any[], newTarget: any) => {
+            notify('weak.timezone')
+            args[0] = useCustomLocales(args[0])
+            return Reflect.construct(target, args, newTarget)
+          },
+          apply: (target: any, thisArg: any, args: any[]) => {
+            notify('weak.timezone')
+            args[0] = useCustomLocales(args[0])
+            return target.apply(thisArg, args)
+          },
+        })
+      }
+
+      /* Number / BigInt toLocaleString（Worker 中 "1 US dollar" 等） */
+      useProxy(gthis.Number.prototype, 'toLocaleString', {
+        apply: (target: any, thisArg: any, args: any[]) => {
+          notify('weak.timezone')
+          args[0] = useCustomLocales(args[0])
+          return target.apply(thisArg, args)
+        }
+      })
+      // @ts-ignore
+      if (gthis.BigInt?.prototype?.toLocaleString) {
+        // @ts-ignore
+        useProxy(gthis.BigInt.prototype, 'toLocaleString', {
+          apply: (target: any, thisArg: any, args: any[]) => {
+            notify('weak.timezone')
+            args[0] = useCustomLocales(args[0])
+            return target.apply(thisArg, args)
+          }
+        })
+      }
+
+      /* Date.parse：Date 对象直接取 getTime；本地字符串按伪装时区校正 */
+      useProxy(gthis.Date, 'parse', {
+        apply: (target: typeof Date.parse, thisArg: any, args: Parameters<typeof Date.parse>) => {
+          notify('weak.timezone')
+          const v = args[0] as any
+          if (v instanceof _Date || Object.prototype.toString.call(v) === '[object Date]') {
+            return (v as Date).getTime()
+          }
+          const raw = target.apply(thisArg, args as any)
+          if (typeof v === 'string' && shouldTreatAsLocal(v)) {
+            return adjustParsedLocalMs(raw)
+          }
+          return raw
+        }
+      })
+
       /* Date */
       useProxy(gthis, 'Date', {
         construct: (target, args, newTarget) => {
           notify('weak.timezone')
           const raw = Reflect.construct(target, args, newTarget);
 
-          if (typeof args[0] === 'string' && args[0].includes('/')) {
-            return Reflect.construct(target, [raw.getTime() - getDiffMs(raw)], newTarget);
+          if (typeof args[0] === 'string' && shouldTreatAsLocal(args[0])) {
+            return Reflect.construct(target, [adjustParsedLocalMs(raw.getTime())], newTarget);
           }
           if (args[1] != null && isNumeric(args[1])) {
-            return Reflect.construct(target, [raw.getTime() - getDiffMs(raw)], newTarget);
+            return Reflect.construct(target, [adjustParsedLocalMs(raw.getTime())], newTarget);
           }
 
           return raw;
@@ -701,7 +842,7 @@ export const hookTasks: HookTask[] = [
 
       /* Date setter */
       useProxy(gthis.Date.prototype,
-        ['setFullYear', 'setMonth', 'setDate', 'setHours', 'setMinutes', 'setSeconds'],
+        ['setFullYear', 'setMonth', 'setDate', 'setHours', 'setMinutes', 'setSeconds', 'setMilliseconds'],
         {
           apply(target: any, thisArg: Date, args: any[]) {
             notify('weak.timezone');
@@ -725,11 +866,39 @@ export const hookTasks: HookTask[] = [
       ], {
         apply: (target: any, thisArg: Date, args: Parameters<typeof Date.prototype.toLocaleString>) => {
           notify('weak.timezone')
-          args[0] = useCustomLocales(args[0]);;
+          args[0] = useCustomLocales(args[0]);
           args[1] = Object.assign({ timeZone: tzValue.zone }, args[1]);
           return target.apply(thisArg, args);
         }
       })
+
+      /* Temporal（若存在） */
+      // @ts-ignore
+      const temporalNow = gthis.Temporal?.Now
+      if (temporalNow) {
+        if (typeof temporalNow.timeZoneId === 'function') {
+          useProxy(temporalNow, 'timeZoneId', {
+            apply: () => {
+              notify('weak.timezone')
+              return tzValue.zone
+            }
+          })
+        }
+        for (const key of [
+          'zonedDateTimeISO', 'zonedDateTime',
+          'plainDateISO', 'plainDateTimeISO', 'plainTimeISO',
+        ] as const) {
+          // @ts-ignore
+          if (typeof temporalNow[key] !== 'function') continue
+          useProxy(temporalNow, key, {
+            apply: (target: any, thisArg: any, args: any[]) => {
+              notify('weak.timezone')
+              if (args[0] == null) args[0] = tzValue.zone
+              return target.apply(thisArg, args)
+            }
+          })
+        }
+      }
     },
   },
 
