@@ -33,7 +33,7 @@ export const genDefaultLocalStorage = (): LocalStorage => {
       fp: {
         navigator: {
           clientHints: { type: HookType.default },
-          languages: { type: HookType.default },
+          languages: { type: HookType.value, value: ['en-US', 'en'] },
           hardwareConcurrency: { type: HookType.default },
         },
         screen: {
@@ -44,7 +44,10 @@ export const genDefaultLocalStorage = (): LocalStorage => {
           gpuInfo: { type: HookType.default },
         },
         other: {
-          timezone: { type: HookType.default },
+          timezone: {
+            type: HookType.value,
+            value: { zone: 'America/Phoenix', locales: ['en-US'] },
+          },
           canvas: { type: HookType.browser },
           audio: { type: HookType.browser },
           webgl: { type: HookType.browser },
