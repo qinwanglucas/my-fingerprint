@@ -1,4 +1,4 @@
-import { getLocalStorage, updateContext } from "./storage";
+import { getLocalStorage } from "./storage";
 import { coreInject } from "@/core/output";
 import { logManager } from '@/utils/log';
 
@@ -23,17 +23,13 @@ export const hasUserScripts = () => {
 }
 
 /**
- * 确保 FastInject 配置正确，返回是否启用
+ * 当前是否真正可用快速注入（不把用户偏好持久改成 false）
  */
 export const ensureFastInject = (storage: LocalStorage) => {
   if (!hasUserScripts()) {
-    if (storage.config.action.fastInject) {
-      // 若配置不同步则更新
-      updateContext({ config: { action: { fastInject: false } } })
-    }
     return false;
   }
-  return storage.config.action.fastInject;
+  return !!storage.config.action.fastInject;
 }
 
 /**

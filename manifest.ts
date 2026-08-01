@@ -2,7 +2,7 @@ import { ManifestV3Export } from "@crxjs/vite-plugin"
 
 const baseManifest: ManifestV3Export = {
   manifest_version: 3,
-  version: '2.8.13',
+  version: '2.8.14',
   name: 'My Fingerprint',
   default_locale: 'zh',
   description: '__MSG_ext_desc__',
@@ -85,9 +85,10 @@ export const firefoxManifest: ManifestV3Export = {
     'clipboardRead',
     'clipboardWrite',
     'privacy',
+    // 安装时一并申请，避免只能靠开关点击才弹出授权
+    'userScripts',
   ],
   optional_permissions: [
-    "userScripts",
     'browsingData',
   ],
   background: {
