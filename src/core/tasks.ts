@@ -97,11 +97,12 @@ export const hookTasks: HookTask[] = [
   {
     onEnable: ({ win, conf, useProxy, makeScript }) => {
       if (!win) return;
+      const windowRef = win;
 
       const blobMap = new Map<string, Blob>();
-      const RawURL = win.URL;
+      const RawURL = windowRef.URL;
 
-      useProxy(win.URL, 'createObjectURL', {
+      useProxy(windowRef.URL, 'createObjectURL', {
         apply(target, thisArg: URL, args: any) {
           const blob = args[0]
           const isBlobLike = blob instanceof Blob ||
@@ -116,7 +117,7 @@ export const hookTasks: HookTask[] = [
         }
       })
 
-      useProxy(win.URL, 'revokeObjectURL', {
+      useProxy(windowRef.URL, 'revokeObjectURL', {
         apply(target, thisArg: URL, args: any) {
           const url = args[0]
           blobMap.delete(String(url))
@@ -125,9 +126,9 @@ export const hookTasks: HookTask[] = [
       })
 
       let tsURLLookup: WeakMap<TrustedScriptURL, TrustedTypePolicy>
-      if (win.TrustedTypePolicy) {
+      if (windowRef.TrustedTypePolicy) {
         tsURLLookup = new WeakMap()
-        useProxy(win.TrustedTypePolicy.prototype, 'createScriptURL', {
+        useProxy(windowRef.TrustedTypePolicy.prototype, 'createScriptURL', {
           apply(target, thisArg: TrustedTypePolicy, args: any) {
             const res = Reflect.apply(target, thisArg, args);
             tsURLLookup.set(res, thisArg);
@@ -138,7 +139,7 @@ export const hookTasks: HookTask[] = [
 
       const readScriptSync = (url: string): string | null => {
         try {
-          const xhr = new win.XMLHttpRequest();
+          const xhr = new windowRef.XMLHttpRequest();
           xhr.open('GET', url, false);
           xhr.send(null);
           if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
@@ -154,7 +155,7 @@ export const hookTasks: HookTask[] = [
           if (!match) return null;
           const meta = match[1] ?? '';
           const data = match[2] ?? '';
-          return /;base64/i.test(meta) ? win.atob(data) : decodeURIComponent(data);
+          return /;base64/i.test(meta) ? windowRef.atob(data) : decodeURIComponent(data);
         } catch (_) {
           return null;
         }
@@ -199,7 +200,7 @@ export const hookTasks: HookTask[] = [
 
         /* http(s) / 相对路径：同源或可同步读取时改写为注入后的 blob */
         try {
-          const abs = new RawURL(href, win.location.href).href;
+          const abs = new RawURL(href, windowRef.location.href).href;
           const text = readScriptSync(abs);
           if (text != null) {
             return wrapWithInject(injected, text, isModule);
@@ -217,7 +218,7 @@ export const hookTasks: HookTask[] = [
             const workerOpts = args[1] as WorkerOptions | undefined;
             const isModule = workerOpts?.type === 'module';
 
-            if (win.TrustedScriptURL && url instanceof win.TrustedScriptURL && tsURLLookup) {
+            if (windowRef.TrustedScriptURL && url instanceof windowRef.TrustedScriptURL && tsURLLookup) {
               const ttp = tsURLLookup.get(url);
               if (ttp) {
                 args[0] = ttp.createScriptURL(
@@ -231,13 +232,13 @@ export const hookTasks: HookTask[] = [
             return Reflect.construct(target, args, newTarget) as Worker;
           }
         })
-        useProxy(win, 'Worker', makeHandler('web'));
-        useProxy(win, 'SharedWorker', makeHandler('shared'));
+        useProxy(windowRef, 'Worker', makeHandler('web'));
+        useProxy(windowRef, 'SharedWorker', makeHandler('shared'));
       }
 
       {
         const isDisabled = conf.fp.other.serviceWorker.type === HookType.disabled;
-        useProxy(win.ServiceWorkerContainer.prototype, 'register', {
+        useProxy(windowRef.ServiceWorkerContainer.prototype, 'register', {
           apply(target, thisArg, args) {
             notify('other.worker.service')
             if (isDisabled) {
