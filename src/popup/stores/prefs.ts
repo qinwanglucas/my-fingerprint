@@ -73,7 +73,7 @@ export const usePrefsStore = create<State & Actions>()(
 
     return {
       theme: 'system',
-      language: getLanguage(navigator.language),
+      language: 'zh-CN',
 
       getThemeName: (theme?: string) => {
         const t = theme ?? get().theme;

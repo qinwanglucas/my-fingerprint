@@ -65,7 +65,7 @@ export const genDefaultLocalStorage = (): LocalStorage => {
         url: 'config.json'
       },
       prefs: {
-        language: navigator.language,
+        language: 'zh-CN',
         theme: 'system',
         logLevel: 'NONE',
       },

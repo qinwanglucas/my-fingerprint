@@ -2,9 +2,9 @@ import { ManifestV3Export } from "@crxjs/vite-plugin"
 
 const baseManifest: ManifestV3Export = {
   manifest_version: 3,
-  version: '2.8.3',
+  version: '2.8.4',
   name: 'My Fingerprint',
-  default_locale: 'en',
+  default_locale: 'zh',
   description: '__MSG_ext_desc__',
   host_permissions: [
     '<all_urls>',
