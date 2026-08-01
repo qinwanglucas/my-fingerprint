@@ -2,7 +2,7 @@ import { ManifestV3Export } from "@crxjs/vite-plugin"
 
 const baseManifest: ManifestV3Export = {
   manifest_version: 3,
-  version: '2.8.12',
+  version: '2.8.13',
   name: 'My Fingerprint',
   default_locale: 'zh',
   description: '__MSG_ext_desc__',
@@ -66,8 +66,13 @@ export const firefoxManifest: ManifestV3Export = {
   browser_specific_settings: {
     // @ts-ignore
     gecko: {
-      id: "my-fingerprint@omegaee.addons",
-      strict_min_version: "136.0",
+      // 自有 AMO 插件 ID（勿沿用原作者 omegaee 的 ID，否则会 Duplicate add-on ID）
+      id: "my-fingerprint@qinwanglucas.addons",
+      strict_min_version: "140.0",
+      // AMO 2025-11 起新插件必填：本扩展不向外传输个人数据
+      data_collection_permissions: {
+        required: ["none"],
+      },
     }
   },
   permissions: [
