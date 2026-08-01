@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Local build helper.
+#   ./build           Build Firefox .xpi/.zip for AMO (default)
+#   ./build firefox   Same as default
+#   ./build chrome    Build Chrome .zip
+#   ./build all       Build Chrome + Firefox packages
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+
+usage() {
+  cat <<'EOF'
+Usage: ./build [firefox|chrome|all]
+
+  firefox   Build & pack Firefox extension for AMO (default)
+  chrome    Build & pack Chrome extension zip
+  all       Build & pack both
+
+Output goes to releases/
+EOF
+}
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: '$1' not found." >&2
+    case "$1" in
+      node|npm)
+        echo "Install Node.js LTS from https://nodejs.org/ (includes npm)," >&2
+        echo "or: brew install node" >&2
+        ;;
+      zip)
+        echo "Install zip, e.g. brew install zip" >&2
+        ;;
+    esac
+    exit 1
+  fi
+}
+
+ensure_deps() {
+  need_cmd node
+  need_cmd npm
+  need_cmd zip
+  if [[ ! -d node_modules ]]; then
+    echo "==> Installing dependencies (npm install)..."
+    npm install
+  fi
+}
+
+pack_dir() {
+  local src="$1"
+  local dest="$2"
+  if [[ ! -f "$src/manifest.json" ]]; then
+    echo "error: $src/manifest.json not found after build" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$dest")"
+  rm -f "$dest"
+  (cd "$src" && zip -r -FS "../$dest" .)
+}
+
+TARGET="${1:-firefox}"
+
+case "$TARGET" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  firefox|xpi|amo)
+    ensure_deps
+    bash "$ROOT/scripts/pack-firefox-xpi.sh"
+    ;;
+  chrome)
+    ensure_deps
+    echo "==> Building Chrome extension..."
+    npm run build
+    VERSION="$(node -e "console.log(require('./dist/manifest.json').version)")"
+    OUT="releases/my-fingerprint-${VERSION}-chrome.zip"
+    echo "==> Packaging dist -> $OUT"
+    pack_dir dist "$OUT"
+    echo
+    echo "Done."
+    echo "  chrome zip: $OUT"
+    ;;
+  all)
+    ensure_deps
+    "$0" chrome
+    "$0" firefox
+    ;;
+  *)
+    echo "error: unknown target '$TARGET'" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
