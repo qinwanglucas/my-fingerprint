@@ -2,7 +2,7 @@ import { genRandomSeed } from "@/utils/base";
 import { debounce, sharedAsync } from "@/utils/timer";
 import { reRequestHeader } from "./request";
 import { HookType } from '@/types/enum'
-import { hasUserScripts, reRegisterScript } from "./script";
+import { reRegisterScript } from "./script";
 import { logManager } from "@/utils/log";
 import { setWebRTCPolicy } from "./privacy";
 import { domainMergeDedup } from "@/utils/url";
@@ -54,12 +54,13 @@ export const genDefaultLocalStorage = (): LocalStorage => {
           webrtc: { type: HookType.enabled },
           font: { type: HookType.default },
           webgpu: { type: HookType.browser },
-          domRect: { type: HookType.browser },
+          domRect: { type: HookType.default },
           serviceWorker: { type: HookType.disabled },
         },
       },
       action: {
-        fastInject: hasUserScripts() ? true : false,
+        // 默认开启；浏览器不支持 userScripts 时 ensureFastInject 会自动关掉
+        fastInject: true,
       },
       input: {
         globalSeed: String(sGlobal),
