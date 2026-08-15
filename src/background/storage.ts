@@ -33,7 +33,7 @@ export const genDefaultLocalStorage = (): LocalStorage => {
       fp: {
         navigator: {
           clientHints: { type: HookType.default },
-          languages: { type: HookType.value, value: ['en-US', 'en'] },
+          languages: { type: HookType.default },
           hardwareConcurrency: { type: HookType.default },
         },
         screen: {
@@ -44,18 +44,17 @@ export const genDefaultLocalStorage = (): LocalStorage => {
           gpuInfo: { type: HookType.default },
         },
         other: {
-          timezone: {
-            type: HookType.value,
-            value: { zone: 'America/Phoenix', locales: ['en-US'] },
-          },
-          canvas: { type: HookType.browser },
-          audio: { type: HookType.browser },
-          webgl: { type: HookType.browser },
-          webrtc: { type: HookType.enabled },
+          timezone: { type: HookType.default },
+          // 强指纹前三项：每个标签页随机
+          canvas: { type: HookType.page },
+          webgl: { type: HookType.page },
+          audio: { type: HookType.page },
+          // 其余强指纹：系统值
+          webrtc: { type: HookType.default },
           font: { type: HookType.default },
-          webgpu: { type: HookType.browser },
+          webgpu: { type: HookType.default },
           domRect: { type: HookType.default },
-          serviceWorker: { type: HookType.disabled },
+          serviceWorker: { type: HookType.default },
         },
       },
       action: {
