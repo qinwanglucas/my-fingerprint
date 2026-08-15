@@ -13,7 +13,6 @@ import MoreView from "./more";
 import { sendToBackground } from "@/utils/message";
 import { NoticePanel } from "./record";
 import PoliciesView from "./policies";
-import { requestPermission } from "@/utils/browser";
 
 import { logManager } from '@/utils/log';
 
@@ -35,26 +34,6 @@ function Application() {
 
   useEffect(() => {
     loadStorage();
-  }, [])
-
-  // 打开弹窗时尝试申请 userScripts（扩展图标点击可视为用户手势；后台无法自动弹窗）
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      const available = await sendToBackground({
-        type: 'api.check',
-        api: 'userScripts',
-      })
-      if (cancelled || available === true) return
-      const ok = await requestPermission('userScripts')
-      if (cancelled || !ok) return
-      const { config, saveConfig } = useStorageStore.getState()
-      if (config && !config.action.fastInject) {
-        config.action.fastInject = true
-        saveConfig()
-      }
-    })().catch(() => { })
-    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {

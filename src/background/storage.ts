@@ -58,8 +58,7 @@ export const genDefaultLocalStorage = (): LocalStorage => {
         },
       },
       action: {
-        // 默认开启；浏览器不支持 userScripts 时 ensureFastInject 会自动关掉
-        fastInject: true,
+        fastInject: false,
       },
       input: {
         globalSeed: String(sGlobal),

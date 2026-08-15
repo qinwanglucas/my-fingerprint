@@ -155,11 +155,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.permissions.onAdded.addListener((perms) => {
   logger.info('chrome.permissions.onAdded triggered:', perms)
   if (perms.permissions?.includes('userScripts')) {
-    // 授权后恢复快速注入偏好并注册脚本
-    updateContext({ config: { action: { fastInject: true } } }).then(() => {
-      reRegisterScript()
-    }).catch(() => {
-      reRegisterScript()
-    })
+    reRegisterScript()
   }
 })
