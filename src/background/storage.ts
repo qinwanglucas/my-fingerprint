@@ -45,14 +45,14 @@ export const genDefaultLocalStorage = (): LocalStorage => {
         },
         other: {
           timezone: { type: HookType.default },
-          // 强指纹前三项：每个标签页随机
+          // 强指纹：每个标签页随机
           canvas: { type: HookType.page },
           webgl: { type: HookType.page },
           audio: { type: HookType.page },
+          font: { type: HookType.page },
+          webgpu: { type: HookType.page },
           // 其余强指纹：系统值
           webrtc: { type: HookType.default },
-          font: { type: HookType.default },
-          webgpu: { type: HookType.default },
           domRect: { type: HookType.default },
           serviceWorker: { type: HookType.default },
         },
